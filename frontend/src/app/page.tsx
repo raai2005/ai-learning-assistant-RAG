@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import YouTubeInput from "@/components/YouTubeInput";
 import PdfUpload from "@/components/PdfUpload";
 import Toast, { ToastType } from "@/components/Toast";
@@ -15,6 +16,7 @@ let toastId = 0;
 
 export default function Home() {
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  const router = useRouter();
 
   const showToast = useCallback((message: string, type: ToastType) => {
     const id = ++toastId;
@@ -24,6 +26,13 @@ export default function Home() {
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const handleSuccess = useCallback(
+    (contentId: string) => {
+      router.push(`/learn/${contentId}`);
+    },
+    [router]
+  );
 
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center px-4 py-16 overflow-hidden">
@@ -59,8 +68,8 @@ export default function Home() {
 
       {/* Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
-        <YouTubeInput onToast={showToast} />
-        <PdfUpload onToast={showToast} />
+        <YouTubeInput onToast={showToast} onSuccess={handleSuccess} />
+        <PdfUpload onToast={showToast} onSuccess={handleSuccess} />
       </div>
 
       {/* Footer */}

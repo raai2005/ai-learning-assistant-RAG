@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { processVideo } from "@/lib/api";
 
 interface YouTubeInputProps {
   onToast: (message: string, type: "success" | "error") => void;
+  onSuccess: (contentId: string) => void;
 }
 
 const YOUTUBE_REGEX =
   /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|shorts\/)|youtu\.be\/)[a-zA-Z0-9_-]{11}/;
 
-export default function YouTubeInput({ onToast }: YouTubeInputProps) {
+export default function YouTubeInput({ onToast, onSuccess }: YouTubeInputProps) {
   const [url, setUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -28,13 +30,13 @@ export default function YouTubeInput({ onToast }: YouTubeInputProps) {
 
     setIsLoading(true);
 
-    // Simulate API call — replace with real backend integration
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      onToast("YouTube video submitted successfully!", "success");
+      const result = await processVideo(url.trim());
+      onToast(`Video processed! ${result.chunks_count} chunks created.`, "success");
       setUrl("");
-    } catch {
-      onToast("Failed to submit. Please try again.", "error");
+      onSuccess(result.content_id);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Failed to process video", "error");
     } finally {
       setIsLoading(false);
     }

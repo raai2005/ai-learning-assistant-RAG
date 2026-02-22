@@ -1,18 +1,19 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { processPdf } from "@/lib/api";
 
 interface PdfUploadProps {
   onToast: (message: string, type: "success" | "error") => void;
+  onSuccess: (contentId: string) => void;
 }
 
 const MAX_FILE_SIZE_MB = 25;
 
-export default function PdfUpload({ onToast }: PdfUploadProps) {
+export default function PdfUpload({ onToast, onSuccess }: PdfUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateFile = (file: File): boolean => {
@@ -67,20 +68,18 @@ export default function PdfUpload({ onToast }: PdfUploadProps) {
     if (!selectedFile) return;
 
     setIsUploading(true);
-    setUploadProgress(0);
 
-    // Simulate upload progress — replace with real backend integration
     try {
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        setUploadProgress(i);
-      }
-      onToast(`"${selectedFile.name}" uploaded successfully!`, "success");
+      const result = await processPdf(selectedFile);
+      onToast(
+        `"${result.filename}" processed! ${result.chunks_count} chunks from ${result.pages_count} pages.`,
+        "success"
+      );
       setSelectedFile(null);
-      setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch {
-      onToast("Upload failed. Please try again.", "error");
+      onSuccess(result.content_id);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Upload failed", "error");
     } finally {
       setIsUploading(false);
     }
@@ -88,7 +87,6 @@ export default function PdfUpload({ onToast }: PdfUploadProps) {
 
   const removeFile = () => {
     setSelectedFile(null);
-    setUploadProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -279,24 +277,6 @@ export default function PdfUpload({ onToast }: PdfUploadProps) {
         </div>
       )}
 
-      {/* Upload Progress */}
-      {isUploading && (
-        <div className="mt-3 animate-fade-in">
-          <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${uploadProgress}%`,
-                background: "var(--accent-gradient)",
-              }}
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1.5 text-right">
-            {uploadProgress}%
-          </p>
-        </div>
-      )}
-
       {/* Upload Button */}
       <button
         onClick={handleUpload}
@@ -326,7 +306,7 @@ export default function PdfUpload({ onToast }: PdfUploadProps) {
                 className="opacity-75"
               />
             </svg>
-            Uploading...
+            Processing...
           </>
         ) : (
           <>
