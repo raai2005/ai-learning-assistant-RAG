@@ -1,26 +1,65 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.schemas import ChatRequest, ChatResponse
+from app.services import gemini, pinecone_service, supabase_service
 
 router = APIRouter()
+
+CHAT_PROMPT = """You are a helpful AI learning assistant. Answer the user's question based ONLY on the provided context. If the context doesn't contain enough information to answer, say so honestly.
+
+Context:
+{context}
+
+User's Question: {question}
+
+Provide a clear, concise, and helpful answer:"""
 
 
 @router.post(
     "/chat",
     response_model=ChatResponse,
     summary="Chat with processed content",
-    description="Send a message/question about processed content. In production, this will embed the query, search the vector DB for relevant chunks, and use an LLM to generate an answer.",
+    description="Embeds the user's question, searches Pinecone for relevant chunks, and uses Gemini LLM to generate an answer based on the retrieved context (RAG).",
 )
 async def chat(request: ChatRequest):
-    # TODO: Replace with real RAG logic
-    # 1. Embed user message (Gemini / OpenAI embeddings)
-    # 2. Search ChromaDB for top-k similar chunks
-    # 3. Build prompt: system context + retrieved chunks + user message
-    # 4. Send to LLM and return response
+    # Verify content exists
+    content = await supabase_service.get_content(request.content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
 
-    return ChatResponse(
-        content_id=request.content_id,
-        reply=f'This is a mock response to your question: "{request.message}". '
-        "In production, this will use RAG to retrieve relevant content and generate an AI-powered answer.",
-        sources=["chunk_1", "chunk_3", "chunk_7"],
-    )
+    try:
+        # 1. Embed the user's question
+        query_embedding = await gemini.get_embeddings(request.message)
+
+        # 2. Search Pinecone for relevant chunks
+        similar_chunks = await pinecone_service.query_similar(
+            query_embedding=query_embedding,
+            content_id=request.content_id,
+            top_k=5,
+        )
+
+        if not similar_chunks:
+            return ChatResponse(
+                content_id=request.content_id,
+                reply="I couldn't find any relevant information in the content to answer your question.",
+                sources=[],
+            )
+
+        # 3. Build context from retrieved chunks
+        context = "\n\n".join([chunk["text"] for chunk in similar_chunks])
+        sources = [f"chunk_{chunk['chunk_index']}" for chunk in similar_chunks]
+
+        # 4. Generate answer via Gemini
+        prompt = CHAT_PROMPT.format(context=context, question=request.message)
+        reply = await gemini.generate_response(prompt)
+
+        return ChatResponse(
+            content_id=request.content_id,
+            reply=reply,
+            sources=sources,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")

@@ -10,10 +10,16 @@ class Settings(BaseSettings):
     # Frontend origin for CORS
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # Future: add API keys, DB URLs, etc.
-    # OPENAI_API_KEY: str = ""
-    # GEMINI_API_KEY: str = ""
-    # CHROMA_PERSIST_DIR: str = "./chroma_data"
+    # Gemini
+    GEMINI_API_KEY: str = ""
+
+    # Pinecone
+    PINECONE_API_KEY: str = ""
+    PINECONE_INDEX_NAME: str = "ai-learning-assistant"
+
+    # Supabase
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
 
     class Config:
         env_file = ".env"

@@ -1,39 +1,85 @@
-from fastapi import APIRouter
+import json
+
+from fastapi import APIRouter, HTTPException
 
 from app.schemas import (
     GenerateFlashcardsRequest,
     GenerateFlashcardsResponse,
     Flashcard,
 )
+from app.services import gemini, pinecone_service, supabase_service
 
 router = APIRouter()
+
+FLASHCARD_PROMPT = """You are an expert educator. Based on the following content, generate exactly {num_cards} flashcards for studying.
+
+Each flashcard should have a clear question and a concise answer.
+
+Return ONLY a valid JSON array of objects with "question" and "answer" keys. No markdown, no explanation, just the JSON array.
+
+Example format:
+[
+  {{"question": "What is X?", "answer": "X is..."}},
+  {{"question": "How does Y work?", "answer": "Y works by..."}}
+]
+
+Content:
+{content}
+"""
 
 
 @router.post(
     "/generate-flashcards",
     response_model=GenerateFlashcardsResponse,
     summary="Generate flashcards from processed content",
-    description="Takes a content_id and generates flashcards. In production, this will retrieve chunks from the vector DB and use an LLM to create Q&A flashcards.",
+    description="Retrieves content chunks from Pinecone and uses Gemini LLM to generate study flashcards.",
 )
 async def generate_flashcards(request: GenerateFlashcardsRequest):
-    # TODO: Replace with real RAG logic
-    # 1. Retrieve chunks for content_id from ChromaDB
-    # 2. Send chunks to LLM with flashcard generation prompt
-    # 3. Parse LLM response into Flashcard objects
+    # Verify content exists
+    content = await supabase_service.get_content(request.content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
 
-    num = request.num_cards or 10
+    try:
+        # 1. Fetch all chunks from Pinecone
+        chunks = await pinecone_service.fetch_all_chunks(request.content_id)
 
-    mock_flashcards = [
-        Flashcard(
-            id=i + 1,
-            question=f"Sample question {i + 1} about the content?",
-            answer=f"This is the answer to question {i + 1}.",
+        if not chunks:
+            raise HTTPException(status_code=404, detail="No chunks found for this content")
+
+        # 2. Combine chunks into context
+        combined_content = "\n\n".join(chunks)
+
+        # 3. Generate flashcards via Gemini
+        num_cards = request.num_cards or 10
+        prompt = FLASHCARD_PROMPT.format(num_cards=num_cards, content=combined_content)
+        response = await gemini.generate_response(prompt)
+
+        # 4. Parse JSON response
+        # Clean up response — remove markdown code fences if present
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        flashcards_data = json.loads(cleaned)
+
+        flashcards = [
+            Flashcard(id=i + 1, question=fc["question"], answer=fc["answer"])
+            for i, fc in enumerate(flashcards_data)
+        ]
+
+        return GenerateFlashcardsResponse(
+            content_id=request.content_id,
+            flashcards=flashcards,
+            total=len(flashcards),
         )
-        for i in range(num)
-    ]
 
-    return GenerateFlashcardsResponse(
-        content_id=request.content_id,
-        flashcards=mock_flashcards,
-        total=len(mock_flashcards),
-    )
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Failed to parse flashcards from AI response")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate flashcards: {str(e)}")

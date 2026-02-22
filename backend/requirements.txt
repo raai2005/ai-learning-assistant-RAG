@@ -3,3 +3,9 @@ uvicorn[standard]
 python-multipart
 pydantic-settings
 python-dotenv
+google-genai
+pinecone
+supabase
+youtube-transcript-api
+PyPDF2
+langchain-text-splitters
