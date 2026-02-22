@@ -31,6 +31,11 @@ export default function YouTubeInput({ onToast, onSuccess }: YouTubeInputProps) 
     setIsLoading(true);
 
     try {
+      // Store source info for the learn page viewer
+      sessionStorage.setItem("sourceType", "video");
+      sessionStorage.setItem("sourceUrl", url.trim());
+      sessionStorage.setItem("sourceTitle", "YouTube Video");
+
       const result = await processVideo(url.trim());
       onToast(`Video processed! ${result.chunks_count} chunks created.`, "success");
       setUrl("");
