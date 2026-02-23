@@ -7,7 +7,7 @@ from app.schemas import (
     GenerateFlashcardsResponse,
     Flashcard,
 )
-from app.services import gemini, pinecone_service, supabase_service
+from app.services import groq_service, pinecone_service, supabase_service
 
 router = APIRouter()
 
@@ -15,13 +15,16 @@ FLASHCARD_PROMPT = """You are an expert educator. Based on the following content
 
 Each flashcard should have a clear question and a concise answer.
 
-Return ONLY a valid JSON array of objects with "question" and "answer" keys. No markdown, no explanation, just the JSON array.
+Return a JSON object with a key "flashcards" containing an array of objects.
+Each object must have "question" and "answer" keys.
 
 Example format:
-[
-  {{"question": "What is X?", "answer": "X is..."}},
-  {{"question": "How does Y work?", "answer": "Y works by..."}}
-]
+{{
+  "flashcards": [
+    {{"question": "What is X?", "answer": "X is..."}},
+    {{"question": "How does Y work?", "answer": "Y works by..."}}
+  ]
+}}
 
 Content:
 {content}
@@ -56,24 +59,19 @@ async def generate_flashcards(request: GenerateFlashcardsRequest):
                  raise HTTPException(status_code=404, detail="No chunks found. The content may have been too short or empty.")
             raise HTTPException(status_code=404, detail="No chunks found for this content")
 
-        # 2. Combine chunks into context
+        # 2. Combine chunks into context (Limit to 20 chunks for speed and API safety)
+        if len(chunks) > 20:
+            chunks = chunks[:20]
         combined_content = "\n\n".join(chunks)
 
-        # 3. Generate flashcards via Gemini
+        # 3. Generate flashcards via Groq (using JSON mode)
         num_cards = request.num_cards or 10
         prompt = FLASHCARD_PROMPT.format(num_cards=num_cards, content=combined_content)
-        response = await gemini.generate_response(prompt)
+        response = await groq_service.generate_response(prompt, json_mode=True)
 
         # 4. Parse JSON response
-        # Clean up response — remove markdown code fences if present
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        flashcards_data = json.loads(cleaned)
+        data = json.loads(response)
+        flashcards_data = data.get("flashcards", [])
 
         flashcards = [
             Flashcard(id=i + 1, question=fc["question"], answer=fc["answer"])

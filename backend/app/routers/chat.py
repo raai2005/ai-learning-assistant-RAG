@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.schemas import ChatRequest, ChatResponse
-from app.services import gemini, pinecone_service, supabase_service
+from app.services import embedding_service, groq_service, pinecone_service, supabase_service
 
 router = APIRouter()
 
@@ -35,8 +35,8 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail=f"Content processing failed: {error_info}")
 
     try:
-        # 1. Embed the user's question (using retry-enabled function)
-        embedding_list = await gemini.get_embeddings_with_retry(request.message)
+        # 1. Embed the user's question
+        embedding_list = await embedding_service.get_embeddings(request.message)
         query_embedding = embedding_list[0]
 
         # 2. Search Pinecone for relevant chunks
@@ -57,9 +57,9 @@ async def chat(request: ChatRequest):
         context = "\n\n".join([chunk["text"] for chunk in similar_chunks])
         sources = [f"chunk_{chunk['chunk_index']}" for chunk in similar_chunks]
 
-        # 4. Generate answer via Gemini
+        # 4. Generate answer via Groq
         prompt = CHAT_PROMPT.format(context=context, question=request.message)
-        reply = await gemini.generate_response(prompt)
+        reply = await groq_service.generate_response(prompt)
 
         return ChatResponse(
             content_id=request.content_id,

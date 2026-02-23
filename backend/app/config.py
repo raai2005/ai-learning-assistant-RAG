@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str = ""
 
+    # Groq
+    GROQ_API_KEY: str = ""
+
     # Pinecone
     PINECONE_API_KEY: str = ""
     PINECONE_INDEX_NAME: str = "ai-learning-assistant"
@@ -21,8 +24,13 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
 
+    # Embedding Model (Local)
+    EMBEDDING_MODEL_NAME: str = "all-distilroberta-v1"
+    TRANSFORMERS_CACHE: str = "D:\\ai_models\\huggingface"
+
     class Config:
         env_file = ".env"
+        extra = "allow" # Allow extra fields for flexibility
 
 
 settings = Settings()

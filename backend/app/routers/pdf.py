@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
 
 from app.schemas import ProcessPdfResponse
-from app.services import gemini, pinecone_service, supabase_service, processor
+from app.services import embedding_service, pinecone_service, supabase_service, processor
 
 router = APIRouter()
 
@@ -54,8 +54,8 @@ async def process_pdf(file: UploadFile = File(...)):
         if len(chunks) > 200:
             chunks = chunks[:200]
 
-        # 4. Generate embeddings via Gemini (now batched and retried)
-        embeddings = await gemini.embed_chunks(chunks)
+        # 4. Generate embeddings via local model
+        embeddings = await embedding_service.embed_chunks(chunks)
 
         # 5. Upsert into Pinecone
         await pinecone_service.upsert_chunks(content_id, chunks, embeddings)

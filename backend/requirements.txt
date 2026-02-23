@@ -4,6 +4,9 @@ python-multipart
 pydantic-settings
 python-dotenv
 google-genai
+groq
+sentence-transformers
+torch
 pinecone
 supabase
 youtube-transcript-api

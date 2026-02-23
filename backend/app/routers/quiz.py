@@ -8,7 +8,7 @@ from app.schemas import (
     QuizQuestion,
     QuizOption,
 )
-from app.services import gemini, pinecone_service, supabase_service
+from app.services import groq_service, pinecone_service, supabase_service
 
 router = APIRouter()
 
@@ -16,7 +16,7 @@ QUIZ_PROMPT = """You are an expert educator. Based on the following content, gen
 
 Each question should have 4 options (A, B, C, D) with exactly one correct answer.
 
-Return ONLY a valid JSON array of objects. No markdown, no explanation, just the JSON array.
+Return a JSON object with a key "questions" containing an array of objects.
 
 Each object should have:
 - "question": the question text
@@ -24,18 +24,20 @@ Each object should have:
 - "correct_answer": the label of the correct option (A, B, C, or D)
 
 Example format:
-[
-  {{
-    "question": "What is X?",
-    "options": [
-      {{"label": "A", "text": "Option 1"}},
-      {{"label": "B", "text": "Option 2"}},
-      {{"label": "C", "text": "Option 3"}},
-      {{"label": "D", "text": "Option 4"}}
-    ],
-    "correct_answer": "A"
-  }}
-]
+{{
+  "questions": [
+    {{
+      "question": "What is X?",
+      "options": [
+        {{"label": "A", "text": "Option 1"}},
+        {{"label": "B", "text": "Option 2"}},
+        {{"label": "C", "text": "Option 3"}},
+        {{"label": "D", "text": "Option 4"}}
+      ],
+      "correct_answer": "A"
+    }}
+  ]
+}}
 
 Content:
 {content}
@@ -70,23 +72,19 @@ async def generate_quiz(request: GenerateQuizRequest):
                  raise HTTPException(status_code=404, detail="No chunks found. The content may have been too short or empty.")
             raise HTTPException(status_code=404, detail="No chunks found for this content")
 
-        # 2. Combine chunks into context
+        # 2. Combine chunks into context (Limit to 20 chunks for speed and API safety)
+        if len(chunks) > 20:
+            chunks = chunks[:20]
         combined_content = "\n\n".join(chunks)
 
-        # 3. Generate quiz via Gemini
+        # 3. Generate quiz via Groq (using JSON mode)
         num_questions = request.num_questions or 5
         prompt = QUIZ_PROMPT.format(num_questions=num_questions, content=combined_content)
-        response = await gemini.generate_response(prompt)
+        response = await groq_service.generate_response(prompt, json_mode=True)
 
         # 4. Parse JSON response
-        cleaned = response.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-
-        quiz_data = json.loads(cleaned)
+        data = json.loads(response)
+        quiz_data = data.get("questions", [])
 
         questions = [
             QuizQuestion(

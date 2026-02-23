@@ -71,7 +71,7 @@ def extract_pdf_text(file_bytes: bytes) -> tuple[str, int]:
 
 
 def chunk_text(
-    text: str, chunk_size: int = 1000, chunk_overlap: int = 200
+    text: str, chunk_size: int = 1500, chunk_overlap: int = 250
 ) -> list[str]:
     """Split text into overlapping chunks."""
     splitter = RecursiveCharacterTextSplitter(
