@@ -51,8 +51,9 @@ async def generate_flashcards(request: GenerateFlashcardsRequest):
         raise HTTPException(status_code=400, detail=f"Content processing failed: {error_info}")
 
     try:
-        # 1. Fetch all chunks from Pinecone
-        chunks = await pinecone_service.fetch_all_chunks(request.content_id)
+        # 1. Fetch chunks from Pinecone using chunks_count for reliability
+        chunks_count = content.get("chunks_count", 0)
+        chunks = await pinecone_service.fetch_all_chunks(request.content_id, chunks_count)
 
         if not chunks:
             if content["status"] == "processed":
@@ -70,7 +71,19 @@ async def generate_flashcards(request: GenerateFlashcardsRequest):
         response = await groq_service.generate_response(prompt, json_mode=True)
 
         # 4. Parse JSON response
-        data = json.loads(response)
+        # Extra safety: Clean up response if AI included markdown blocks
+        cleaned_response = response.strip()
+        if "```json" in cleaned_response:
+            cleaned_response = cleaned_response.split("```json")[1].split("```")[0].strip()
+        elif "```" in cleaned_response:
+            cleaned_response = cleaned_response.split("```")[1].split("```")[0].strip()
+        
+        try:
+            data = json.loads(cleaned_response)
+        except json.JSONDecodeError as jde:
+            print(f"DEBUG: Failed to parse JSON. Response was: {response}")
+            raise jde
+
         flashcards_data = data.get("flashcards", [])
 
         flashcards = [

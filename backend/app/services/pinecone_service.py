@@ -55,19 +55,26 @@ async def query_similar(
     ]
 
 
-async def fetch_all_chunks(content_id: str) -> list[str]:
-    """Fetch all chunks for a content_id by querying with a dummy vector."""
-    # Use a zero vector to match all, filtered by content_id
-    dummy_vector = [0.0] * 768
-    results = index.query(
-        vector=dummy_vector,
-        top_k=1000,
-        include_metadata=True,
-        filter={"content_id": {"$eq": content_id}},
-    )
+async def fetch_all_chunks(content_id: str, chunks_count: int) -> list[str]:
+    """Fetch all chunks for a content_id using direct ID fetching (more reliable than vector query)."""
+    if chunks_count <= 0:
+        return []
 
-    # Sort by chunk_index and return texts
-    sorted_matches = sorted(
-        results.matches, key=lambda m: m.metadata.get("chunk_index", 0)
-    )
-    return [match.metadata.get("text", "") for match in sorted_matches]
+    # Generate all potential IDs for this content
+    ids = [f"{content_id}_{i}" for i in range(chunks_count)]
+    
+    # Pinecone fetch can handle lists of IDs
+    # Fetch in batches if count is very high (limit is 100 normally for fetch)
+    all_texts = []
+    batch_size = 100
+    for i in range(0, len(ids), batch_size):
+        batch_ids = ids[i : i + batch_size]
+        results = index.fetch(ids=batch_ids)
+        
+        # Extract text from metadata, maintaining order
+        for vid in batch_ids:
+            if vid in results.vectors:
+                text = results.vectors[vid].metadata.get("text", "")
+                all_texts.append(text)
+    
+    return all_texts
