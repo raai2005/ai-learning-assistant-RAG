@@ -56,9 +56,10 @@ async def generate_flashcards(request: GenerateFlashcardsRequest):
         chunks = await pinecone_service.fetch_all_chunks(request.content_id, chunks_count)
 
         if not chunks:
+            # Final attempt: If status is processed and we still have no chunks, something is wrong
             if content["status"] == "processed":
-                 raise HTTPException(status_code=404, detail="No chunks found. The content may have been too short or empty.")
-            raise HTTPException(status_code=404, detail="No chunks found for this content")
+                 raise HTTPException(status_code=404, detail="No chunks found. This document might need to be re-uploaded to work with the updated engine.")
+            raise HTTPException(status_code=400, detail="Content is still being processed or failed.")
 
         # 2. Combine chunks into context (Limit to 20 chunks for speed and API safety)
         if len(chunks) > 20:
@@ -71,20 +72,34 @@ async def generate_flashcards(request: GenerateFlashcardsRequest):
         response = await groq_service.generate_response(prompt, json_mode=True)
 
         # 4. Parse JSON response
-        # Extra safety: Clean up response if AI included markdown blocks
         cleaned_response = response.strip()
+        
+        # Groq's JSON mode can still sometimes return a string with a markdown block if not careful
         if "```json" in cleaned_response:
             cleaned_response = cleaned_response.split("```json")[1].split("```")[0].strip()
         elif "```" in cleaned_response:
             cleaned_response = cleaned_response.split("```")[1].split("```")[0].strip()
-        
+            
         try:
+            # First try direct parse
             data = json.loads(cleaned_response)
-        except json.JSONDecodeError as jde:
-            print(f"DEBUG: Failed to parse JSON. Response was: {response}")
-            raise jde
+        except json.JSONDecodeError:
+            # Strategy 2: Try to find the first { and the last }
+            try:
+                start = cleaned_response.find("{")
+                end = cleaned_response.rfind("}") + 1
+                if start != -1 and end != 0:
+                    data = json.loads(cleaned_response[start:end])
+                else:
+                    raise ValueError("No JSON object found in response")
+            except Exception:
+                print(f"DEBUG: Failed to parse AI Response: {response}")
+                raise HTTPException(status_code=500, detail="AI returned an invalid format for flashcards. Please try again.")
 
         flashcards_data = data.get("flashcards", [])
+        if not flashcards_data and isinstance(data, list):
+            # Compatibility with old array-only response format
+            flashcards_data = data
 
         flashcards = [
             Flashcard(id=i + 1, question=fc["question"], answer=fc["answer"])

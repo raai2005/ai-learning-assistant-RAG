@@ -55,26 +55,36 @@ async def query_similar(
     ]
 
 
-async def fetch_all_chunks(content_id: str, chunks_count: int) -> list[str]:
-    """Fetch all chunks for a content_id using direct ID fetching (more reliable than vector query)."""
-    if chunks_count <= 0:
-        return []
-
-    # Generate all potential IDs for this content
-    ids = [f"{content_id}_{i}" for i in range(chunks_count)]
+async def fetch_all_chunks(content_id: str, chunks_count: int | None = None) -> list[str]:
+    """Fetch all chunks for a content_id using direct ID fetching or fallback query."""
     
-    # Pinecone fetch can handle lists of IDs
-    # Fetch in batches if count is very high (limit is 100 normally for fetch)
-    all_texts = []
-    batch_size = 100
-    for i in range(0, len(ids), batch_size):
-        batch_ids = ids[i : i + batch_size]
-        results = index.fetch(ids=batch_ids)
+    # Path A: Fast & Reliable (Direct ID Fetch)
+    if chunks_count and chunks_count > 0:
+        ids = [f"{content_id}_{i}" for i in range(chunks_count)]
+        all_texts = []
+        batch_size = 100
+        for i in range(0, len(ids), batch_size):
+            batch_ids = ids[i : i + batch_size]
+            results = index.fetch(ids=batch_ids)
+            for vid in batch_ids:
+                if vid in results.vectors:
+                    all_texts.append(results.vectors[vid].metadata.get("text", ""))
         
-        # Extract text from metadata, maintaining order
-        for vid in batch_ids:
-            if vid in results.vectors:
-                text = results.vectors[vid].metadata.get("text", "")
-                all_texts.append(text)
+        if all_texts:
+            return all_texts
+
+    # Path B: Fallback (Vector Query) - Needed for old records without chunks_count
+    # Or if Path A failed for some reason
+    dummy_vector = [0.0] * 768
+    results = index.query(
+        vector=dummy_vector,
+        top_k=500, # Limit to 500 for safety
+        include_metadata=True,
+        filter={"content_id": {"$eq": content_id}},
+    )
     
-    return all_texts
+    # Sort matches by chunk_index
+    sorted_matches = sorted(
+        results.matches, key=lambda m: m.metadata.get("chunk_index", 0)
+    )
+    return [match.metadata.get("text", "") for match in sorted_matches]
