@@ -13,6 +13,7 @@ router = APIRouter()
     description="Downloads the transcript, chunks it, generates Gemini embeddings, stores vectors in Pinecone, and saves metadata in Supabase.",
 )
 async def process_video(request: ProcessVideoRequest):
+    content_id = None
     try:
         # 1. Get transcript from YouTube
         transcript = processor.get_youtube_transcript(request.youtube_url)
@@ -28,8 +29,12 @@ async def process_video(request: ProcessVideoRequest):
 
         # 3. Chunk the transcript
         chunks = processor.chunk_text(transcript)
+        
+        # Free Tier Safety Limit: Max 200 chunks per video
+        if len(chunks) > 200:
+            chunks = chunks[:200]
 
-        # 4. Generate embeddings via Gemini
+        # 4. Generate embeddings via Gemini (now batched and retried)
         embeddings = await gemini.embed_chunks(chunks)
 
         # 5. Upsert into Pinecone
@@ -47,7 +52,11 @@ async def process_video(request: ProcessVideoRequest):
             created_at=content["created_at"],
         )
 
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process video: {str(e)}")
+        error_msg = str(e)
+        if content_id:
+            await supabase_service.update_content(content_id, status="failed", error_message=error_msg)
+        
+        if isinstance(e, ValueError):
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Failed to process video: {error_msg}")

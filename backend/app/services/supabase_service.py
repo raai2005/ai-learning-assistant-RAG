@@ -28,12 +28,21 @@ async def create_content(
 
 
 async def update_content(
-    content_id: str, chunks_count: int, status: str = "processed"
+    content_id: str, 
+    chunks_count: int | None = None, 
+    status: str = "processed",
+    error_message: str | None = None
 ) -> dict:
     """Update content record after processing."""
+    update_data = {"status": status}
+    if chunks_count is not None:
+        update_data["chunks_count"] = chunks_count
+    if error_message:
+        update_data["metadata"] = {"error": error_message}
+        
     result = (
         supabase.table(TABLE_NAME)
-        .update({"chunks_count": chunks_count, "status": status})
+        .update(update_data)
         .eq("id", content_id)
         .execute()
     )

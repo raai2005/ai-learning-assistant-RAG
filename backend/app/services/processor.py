@@ -21,10 +21,35 @@ def extract_video_id(url: str) -> str:
 
 def get_youtube_transcript(url: str) -> str:
     """Fetch the transcript of a YouTube video."""
+    from youtube_transcript_api import YouTubeTranscriptApiException
+    
     video_id = extract_video_id(url)
-    transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-    transcript_text = " ".join([entry["text"] for entry in transcript_list])
-    return transcript_text
+    try:
+        api = YouTubeTranscriptApi()
+        # Get all available transcripts
+        transcript_list = api.list(video_id)
+        
+        try:
+            # Try to find English first (manually created or generated)
+            transcript_obj = transcript_list.find_transcript(['en'])
+        except Exception:
+            # Fallback: Just take the first one ever available
+            try:
+                transcript_obj = next(iter(transcript_list))
+            except StopIteration:
+                raise ValueError("No transcripts are available for this video.")
+            
+        fetched = transcript_obj.fetch()
+        transcript_text = " ".join([snippet.text for snippet in fetched])
+        return transcript_text
+    except YouTubeTranscriptApiException as e:
+        # This catches general API errors (e.g. video unavailable, blocked, etc.)
+        raise ValueError(f"YouTube Transcript API error: {str(e)}")
+    except ValueError as e:
+        # Pass through our own ValueErrors (like "No transcripts available")
+        raise e
+    except Exception as e:
+        raise ValueError(f"An unexpected error occurred while fetching transcript: {str(e)}")
 
 
 def get_youtube_title(url: str) -> str:

@@ -22,14 +22,22 @@ Provide a clear, concise, and helpful answer:"""
     description="Embeds the user's question, searches Pinecone for relevant chunks, and uses Gemini LLM to generate an answer based on the retrieved context (RAG).",
 )
 async def chat(request: ChatRequest):
-    # Verify content exists
+    # Verify content exists and is processed
     content = await supabase_service.get_content(request.content_id)
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
+    
+    if content["status"] == "processing":
+        raise HTTPException(status_code=400, detail="Content is still being processed. Please try again in a few moments.")
+    
+    if content["status"] == "failed":
+        error_info = content.get("metadata", {}).get("error", "Unknown error")
+        raise HTTPException(status_code=400, detail=f"Content processing failed: {error_info}")
 
     try:
-        # 1. Embed the user's question
-        query_embedding = await gemini.get_embeddings(request.message)
+        # 1. Embed the user's question (using retry-enabled function)
+        embedding_list = await gemini.get_embeddings_with_retry(request.message)
+        query_embedding = embedding_list[0]
 
         # 2. Search Pinecone for relevant chunks
         similar_chunks = await pinecone_service.query_similar(

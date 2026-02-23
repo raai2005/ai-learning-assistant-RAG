@@ -49,16 +49,25 @@ Content:
     description="Retrieves content chunks from Pinecone and uses Gemini LLM to generate a multiple-choice quiz.",
 )
 async def generate_quiz(request: GenerateQuizRequest):
-    # Verify content exists
+    # Verify content exists and is processed
     content = await supabase_service.get_content(request.content_id)
     if not content:
         raise HTTPException(status_code=404, detail="Content not found")
+    
+    if content["status"] == "processing":
+        raise HTTPException(status_code=400, detail="Content is still being processed. Please try again in a few moments.")
+    
+    if content["status"] == "failed":
+        error_info = content.get("metadata", {}).get("error", "Unknown error")
+        raise HTTPException(status_code=400, detail=f"Content processing failed: {error_info}")
 
     try:
         # 1. Fetch all chunks from Pinecone
         chunks = await pinecone_service.fetch_all_chunks(request.content_id)
 
         if not chunks:
+            if content["status"] == "processed":
+                 raise HTTPException(status_code=404, detail="No chunks found. The content may have been too short or empty.")
             raise HTTPException(status_code=404, detail="No chunks found for this content")
 
         # 2. Combine chunks into context

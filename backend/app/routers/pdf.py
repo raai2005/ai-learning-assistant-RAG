@@ -30,6 +30,7 @@ async def process_pdf(file: UploadFile = File(...)):
             detail=f"File too large ({file_size_mb:.1f}MB). Maximum is 25MB.",
         )
 
+    content_id = None
     try:
         # 1. Extract text from PDF
         text, pages_count = processor.extract_pdf_text(contents)
@@ -48,8 +49,12 @@ async def process_pdf(file: UploadFile = File(...)):
 
         # 3. Chunk the text
         chunks = processor.chunk_text(text)
+        
+        # Free Tier Safety Limit: Max 200 chunks per PDF
+        if len(chunks) > 200:
+            chunks = chunks[:200]
 
-        # 4. Generate embeddings via Gemini
+        # 4. Generate embeddings via Gemini (now batched and retried)
         embeddings = await gemini.embed_chunks(chunks)
 
         # 5. Upsert into Pinecone
@@ -67,7 +72,13 @@ async def process_pdf(file: UploadFile = File(...)):
             created_at=content["created_at"],
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+        error_msg = str(e)
+        if content_id:
+            await supabase_service.update_content(content_id, status="failed", error_message=error_msg)
+            
+        if isinstance(e, HTTPException):
+            raise e
+        if isinstance(e, ValueError):
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {error_msg}")
