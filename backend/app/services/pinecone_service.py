@@ -31,6 +31,10 @@ async def upsert_chunks(
         batch = vectors[i : i + batch_size]
         index.upsert(vectors=batch)
 
+    # Ensure Pinecone index propagates before we mark as 'processed'
+    import asyncio
+    await asyncio.sleep(2)
+
     return len(vectors)
 
 
@@ -56,35 +60,46 @@ async def query_similar(
 
 
 async def fetch_all_chunks(content_id: str, chunks_count: int | None = None) -> list[str]:
-    """Fetch all chunks for a content_id using direct ID fetching or fallback query."""
+    """Fetch all chunks with a retry policy for maximum reliability."""
+    import asyncio
     
-    # Path A: Fast & Reliable (Direct ID Fetch)
-    if chunks_count and chunks_count > 0:
-        ids = [f"{content_id}_{i}" for i in range(chunks_count)]
+    max_retries = 3
+    retry_delay = 1.5
+
+    for attempt in range(max_retries):
         all_texts = []
-        batch_size = 100
-        for i in range(0, len(ids), batch_size):
-            batch_ids = ids[i : i + batch_size]
-            results = index.fetch(ids=batch_ids)
-            for vid in batch_ids:
-                if vid in results.vectors:
-                    all_texts.append(results.vectors[vid].metadata.get("text", ""))
         
+        # Path A: Direct ID Fetch (Preferred)
+        if chunks_count and chunks_count > 0:
+            ids = [f"{content_id}_{i}" for i in range(chunks_count)]
+            batch_size = 100
+            for i in range(0, len(ids), batch_size):
+                batch_ids = ids[i : i + batch_size]
+                results = index.fetch(ids=batch_ids)
+                for vid in batch_ids:
+                    if vid in results.vectors:
+                        all_texts.append(results.vectors[vid].metadata.get("text", ""))
+        
+        # Path B: Fallback (Vector Query)
+        if not all_texts:
+            dummy_vector = [0.0] * 768
+            results = index.query(
+                vector=dummy_vector,
+                top_k=1000,
+                include_metadata=True,
+                filter={"content_id": {"$eq": content_id}},
+            )
+            sorted_matches = sorted(
+                results.matches, key=lambda m: m.metadata.get("chunk_index", 0)
+            )
+            all_texts = [match.metadata.get("text", "") for match in sorted_matches]
+
         if all_texts:
             return all_texts
-
-    # Path B: Fallback (Vector Query) - Needed for old records without chunks_count
-    # Or if Path A failed for some reason
-    dummy_vector = [0.0] * 768
-    results = index.query(
-        vector=dummy_vector,
-        top_k=500, # Limit to 500 for safety
-        include_metadata=True,
-        filter={"content_id": {"$eq": content_id}},
-    )
+            
+        # If we reach here, we found nothing. Wait and retry.
+        if attempt < max_retries - 1:
+            print(f"DEBUG: Pinecone fetch empty, retrying in {retry_delay}s (Attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(retry_delay)
     
-    # Sort matches by chunk_index
-    sorted_matches = sorted(
-        results.matches, key=lambda m: m.metadata.get("chunk_index", 0)
-    )
-    return [match.metadata.get("text", "") for match in sorted_matches]
+    return []

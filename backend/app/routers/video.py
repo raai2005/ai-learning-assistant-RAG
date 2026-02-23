@@ -1,62 +1,66 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 
 from app.schemas import ProcessVideoRequest, ProcessVideoResponse
 from app.services import embedding_service, pinecone_service, supabase_service, processor
 
 router = APIRouter()
 
+async def run_background_video_process(content_id: str, youtube_url: str):
+    """Background task for videos: Transcript -> Embeddings -> Vector DB."""
+    try:
+        # 1. Fetch transcript and title
+        transcript = processor.get_youtube_transcript(youtube_url)
+        chunks = processor.chunk_text(transcript)
+        
+        # Max limit for stability
+        if len(chunks) > 500:
+            chunks = chunks[:500]
+
+        # 2. Embed
+        embeddings = await embedding_service.embed_chunks(chunks)
+
+        # 3. Upsert to Pinecone (Includes durability wait)
+        await pinecone_service.upsert_chunks(content_id, chunks, embeddings)
+
+        # 4. Mark as DONE
+        await supabase_service.update_content(content_id, len(chunks), "processed")
+        print(f"SUCCESS: Video processing complete for: {content_id}")
+
+    except Exception as e:
+        print(f"CRITICAL ERROR: Video background process failed for {content_id}: {str(e)}")
+        await supabase_service.update_content(content_id, status="failed", error_message=str(e))
+
 
 @router.post(
     "/process-video",
     response_model=ProcessVideoResponse,
-    summary="Process a YouTube video",
-    description="Downloads the transcript, chunks it, generates Gemini embeddings, stores vectors in Pinecone, and saves metadata in Supabase.",
+    summary="Process a YouTube video (Background)",
+    description="Starts a background job to fetch transcript and process. Returns the content ID immediately.",
 )
-async def process_video(request: ProcessVideoRequest):
-    content_id = None
+async def process_video(request: ProcessVideoRequest, background_tasks: BackgroundTasks):
+    # Get title quickly (or use a placeholder) to create record
     try:
-        # 1. Get transcript from YouTube
-        transcript = processor.get_youtube_transcript(request.youtube_url)
         title = processor.get_youtube_title(request.youtube_url)
+    except:
+        title = "YouTube Video"
 
-        # 2. Create content record in Supabase
-        content = await supabase_service.create_content(
-            content_type="video",
-            source=request.youtube_url,
-            title=title,
-        )
-        content_id = content["id"]
+    # 1. Create Initial Entry
+    content = await supabase_service.create_content(
+        content_type="video",
+        source=request.youtube_url,
+        title=title,
+    )
+    content_id = content["id"]
 
-        # 3. Chunk the transcript
-        chunks = processor.chunk_text(transcript)
-        
-        # Free Tier Safety Limit: Max 200 chunks per video
-        if len(chunks) > 200:
-            chunks = chunks[:200]
+    # 2. Add to Background Tasks
+    background_tasks.add_task(run_background_video_process, content_id, request.youtube_url)
 
-        # 4. Generate embeddings via local model
-        embeddings = await embedding_service.embed_chunks(chunks)
-
-        # 5. Upsert into Pinecone
-        await pinecone_service.upsert_chunks(content_id, chunks, embeddings)
-
-        # 6. Update Supabase with chunk count + status
-        await supabase_service.update_content(content_id, len(chunks), "processed")
-
-        return ProcessVideoResponse(
-            content_id=content_id,
-            title=title,
-            duration=None,
-            chunks_count=len(chunks),
-            status="processed",
-            created_at=content["created_at"],
-        )
-
-    except Exception as e:
-        error_msg = str(e)
-        if content_id:
-            await supabase_service.update_content(content_id, status="failed", error_message=error_msg)
-        
-        if isinstance(e, ValueError):
-            raise HTTPException(status_code=400, detail=error_msg)
-        raise HTTPException(status_code=500, detail=f"Failed to process video: {error_msg}")
+    # 3. Return Instant Response
+    return ProcessVideoResponse(
+        content_id=content_id,
+        title=title,
+        duration=None,
+        chunks_count=0,
+        status="processing",
+        created_at=content["created_at"],
+    )

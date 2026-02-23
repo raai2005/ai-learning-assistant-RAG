@@ -69,9 +69,10 @@ async def generate_quiz(request: GenerateQuizRequest):
         chunks = await pinecone_service.fetch_all_chunks(request.content_id, chunks_count)
 
         if not chunks:
+            # Final attempt: If status is processed and we still have no chunks, something is wrong
             if content["status"] == "processed":
-                 raise HTTPException(status_code=404, detail="No chunks found. The content may have been too short or empty.")
-            raise HTTPException(status_code=404, detail="No chunks found for this content")
+                 raise HTTPException(status_code=404, detail="No quiz content found. This document might need clear text to process.")
+            raise HTTPException(status_code=400, detail="Content is still being processed or failed.")
 
         # 2. Combine chunks into context (Limit to 20 chunks for speed and API safety)
         if len(chunks) > 20:
@@ -84,7 +85,6 @@ async def generate_quiz(request: GenerateQuizRequest):
         response = await groq_service.generate_response(prompt, json_mode=True)
 
         # 4. Parse JSON response
-        # Extra safety: Clean up response if AI included markdown blocks
         cleaned_response = response.strip()
         if "```json" in cleaned_response:
             cleaned_response = cleaned_response.split("```json")[1].split("```")[0].strip()
@@ -92,12 +92,21 @@ async def generate_quiz(request: GenerateQuizRequest):
             cleaned_response = cleaned_response.split("```")[1].split("```")[0].strip()
             
         try:
+            # Strategy 1: Direct parse
             data = json.loads(cleaned_response)
-        except json.JSONDecodeError as jde:
-            print(f"DEBUG: Failed to parse JSON. Response was: {response}")
-            raise jde
+        except json.JSONDecodeError:
+            # Strategy 2: Bracket search
+            try:
+                start = cleaned_response.find("{")
+                end = cleaned_response.rfind("}") + 1
+                data = json.loads(cleaned_response[start:end])
+            except:
+                print(f"DEBUG: Failed to parse Quiz JSON: {response}")
+                raise HTTPException(status_code=500, detail="AI returned invalid quiz format. Please try again.")
             
         quiz_data = data.get("questions", [])
+        if not quiz_data and isinstance(data, list):
+            quiz_data = data
 
         questions = [
             QuizQuestion(

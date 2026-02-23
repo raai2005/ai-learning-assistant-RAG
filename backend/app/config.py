@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # Groq
     GROQ_API_KEY: str = ""
 
+    # Hugging Face (Optional, but recommended for speed)
+    HUGGINGFACE_API_KEY: str = ""
+
     # Pinecone
     PINECONE_API_KEY: str = ""
     PINECONE_INDEX_NAME: str = "ai-learning-assistant"

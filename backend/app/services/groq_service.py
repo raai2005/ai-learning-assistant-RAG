@@ -5,17 +5,17 @@ client = Groq(api_key=settings.GROQ_API_KEY)
 
 MODEL_NAME = "llama-3.1-8b-instant" # Faster model with higher rate limits
 
-async def generate_response(prompt: str, system_prompt: str = "You are a helpful learning assistant.", json_mode: bool = False) -> str:
+async def generate_response(prompt: str, system_prompt: str = "You are a helpful learning assistant.", json_mode: bool = False, model_override: str | None = None) -> str:
     """Generate a text response using Groq LLM."""
     try:
         kwargs = {
-            "model": MODEL_NAME,
+            "model": model_override or MODEL_NAME,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.7,
-            "max_tokens": 2048,
+            "temperature": 0.5, # Lower temperature for better structural reliability
+            "max_tokens": 4096, # Increased for high-quality chat
         }
         
         if json_mode:

@@ -5,14 +5,21 @@ from app.services import embedding_service, groq_service, pinecone_service, supa
 
 router = APIRouter()
 
-CHAT_PROMPT = """You are a helpful AI learning assistant. Answer the user's question based ONLY on the provided context. If the context doesn't contain enough information to answer, say so honestly.
+CHAT_PROMPT = """You are an expert academic tutor and study assistant. Your goal is to help the user understand the content deeply.
+
+RULES:
+1. Use ONLY the provided context to answer. If the answer isn't there, say you don't know based on the material.
+2. Format your response using clean Markdown.
+3. Use bullet points, bold text, and numbered lists to make the information easy to digest.
+4. If the user asks for "basic questions" or a "summary", provide a well-structured list.
+5. Keep a professional, encouraging tone.
 
 Context:
 {context}
 
 User's Question: {question}
 
-Provide a clear, concise, and helpful answer:"""
+Response:"""
 
 
 @router.post(
@@ -57,9 +64,9 @@ async def chat(request: ChatRequest):
         context = "\n\n".join([chunk["text"] for chunk in similar_chunks])
         sources = [f"chunk_{chunk['chunk_index']}" for chunk in similar_chunks]
 
-        # 4. Generate answer via Groq
+        # 4. Generate answer via Groq (using the high-performance model for chat)
         prompt = CHAT_PROMPT.format(context=context, question=request.message)
-        reply = await groq_service.generate_response(prompt)
+        reply = await groq_service.generate_response(prompt, model_override="llama-3.3-70b-versatile")
 
         return ChatResponse(
             content_id=request.content_id,
